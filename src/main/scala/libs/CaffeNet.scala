@@ -26,8 +26,8 @@ object CaffeNet {
 }
 
 class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preprocessor, caffeNet: FloatNet) {
-  private val inputSize = netParam.input_size
-  private val batchSize = netParam.input_shape(0).dim(0).toInt
+  val inputSize = netParam.input_size
+  val batchSize = netParam.input_shape(0).dim(0).toInt
   private val transformations = new Array[Any => NDArray](inputSize)
   private val inputIndices = new Array[Int](inputSize)
   private val columnNames = schema.map(entry => entry.name)
@@ -35,10 +35,10 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
   private val inputRef = new Array[FloatBlob](inputSize)
   def getNet = caffeNet // TODO: For debugging
 
-  private val numOutputs = caffeNet.num_outputs
-  private val numLayers = caffeNet.layers().size.toInt
-  private val layerNames = List.range(0, numLayers).map(i => caffeNet.layers.get(i).layer_param.name.getString)
-  private val numLayerBlobs = List.range(0, numLayers).map(i => caffeNet.layers.get(i).blobs().size.toInt)
+  val numOutputs = caffeNet.num_outputs
+  val numLayers = caffeNet.layers().size.toInt
+  val layerNames = List.range(0, numLayers).map(i => caffeNet.layers.get(i).layer_param.name.getString)
+  val numLayerBlobs = List.range(0, numLayers).map(i => caffeNet.layers.get(i).blobs().size.toInt)
 
   // Caffe.set_mode(Caffe.GPU)
 
@@ -60,29 +60,31 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
     inputRef(i) = new FloatBlob(dims)
     inputs.put(i, inputRef(i))
   }
-  val inputBuffer = new Array[Array[Float]](inputSize)
+  // in `inputBuffer`, the first index indexes the input argument, the second
+  // index indexes into the batch, the third index indexes the values in the
+  // data
+  val inputBuffer = new Array[Array[Array[Float]]](inputSize)
   val inputBufferSize = new Array[Int](inputSize)
   for (i <- 0 to inputSize - 1) {
     inputBufferSize(i) = JavaCPPUtils.getInputShape(netParam, i).drop(1).product // drop 1 to ignore batchSize
-    inputBuffer(i) = new Array[Float](inputBufferSize(i) * batchSize)
+    inputBuffer(i) = new Array[Array[Float]](batchSize)
+    for (batchIndex <- 0 to batchSize - 1) {
+      inputBuffer(i)(batchIndex) = new Array[Float](inputBufferSize(i))
+    }
   }
 
-  def transformInto(iterator: Iterator[Row], data: FloatBlobVector) = {
+  def transformInto(iterator: Iterator[Row], inputs: FloatBlobVector) = {
     var batchIndex = 0
     while (iterator.hasNext && batchIndex != batchSize) {
       val row = iterator.next
       for (i <- 0 to inputSize - 1) {
         val result = transformations(i)(row(inputIndices(i)))
-        val flatArray = result.toFlat() // TODO: Make this efficient
-        System.arraycopy(flatArray, 0, inputBuffer(i), batchIndex * inputBufferSize(i), inputBufferSize(i))
+        assert(result.shape.product == inputBuffer(i)(batchIndex).length)
+        result.flatCopy(inputBuffer(i)(batchIndex))
       }
       batchIndex += 1
     }
-    for (i <- 0 to inputSize - 1) {
-      val blob = data.get(i)
-      val buffer = blob.cpu_data()
-      buffer.put(inputBuffer(i), 0, batchSize * inputBufferSize(i))
-    }
+    JavaCPPUtils.arraysToFloatBlobVector(inputBuffer, inputs, batchSize, inputBufferSize, inputSize)
   }
 
   def forward(rowIt: Iterator[Row], dataBlobNames: List[String] = List[String]()): Map[String, NDArray] = {
