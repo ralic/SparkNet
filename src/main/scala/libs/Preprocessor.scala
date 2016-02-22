@@ -54,14 +54,16 @@ class ImageNetPreprocessor(schema: StructType, meanImage: Array[Float], fullHeig
   def convert(name: String, shape: Array[Int]): (Any, Array[Float]) => Unit = {
     schema(name).dataType match {
       case IntegerType => (element: Any, buffer: Array[Float]) => {
-        NDArray(Array[Float](element.asInstanceOf[Int].toFloat), shape)
+        if (buffer.length != shape.product) { throw new Exception("buffer.length and shape.product don't agree, buffer has length " + buffer.length.toString + ", but shape is " + shape.deep.toString) }
+        NDArray(Array[Float](element.asInstanceOf[Int].toFloat), shape).flatCopy(buffer)
       }
-      case BinaryType => (element: Any, buffer: Array[Float]) => {
+      case BinaryType => {
         if (shape(0) != 3) {
           throw new IllegalArgumentException("Expecting input image to have 3 channels.")
         }
         val tempBuffer = new Array[Float](3 * fullHeight * fullWidth)
-        (element: Any) => {
+        (element: Any, buffer: Array[Float]) => {
+          if (buffer.length != shape.product) { throw new Exception("buffer.length and shape.product don't agree, buffer has length " + buffer.length.toString + ", but shape is " + shape.deep.toString) }
           element match {
             case element: Array[Byte] => {
               var index = 0
