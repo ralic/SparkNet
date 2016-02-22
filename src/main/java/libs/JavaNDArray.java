@@ -82,8 +82,13 @@ public class JavaNDArray implements java.io.Serializable {
 
   public void flatCopy(float[] result) {
     assert(result.length == JavaNDUtils.arrayProduct(shape));
-    flatIndex = 0;
-    recursiveFlatInto(0, offset, result);
+    if (dim == 0) { // handle 0-dimensional case
+      assert(result.length == 1);
+      result[0] = get();
+    } else {
+      flatIndex = 0;
+      recursiveFlatInto(0, offset, result);
+    }
   }
 
   public void flatCopySlow(float[] result) {
