@@ -143,7 +143,7 @@ class PreprocessorSpec extends FlatSpec with BeforeAndAfterAll {
     val endTime = System.currentTimeMillis()
     val totalTime = (endTime - startTime) * 1F / 1000
     print("ImageNetPreprocessor converted 256 images in " + totalTime.toString + "s\n")
-    assert(totalTime <= 0.1)
+    assert(totalTime <= 0.2)
   }
 
 }
