@@ -28,7 +28,7 @@ class CaffeNetSpec extends FlatSpec {
     val schema = StructType(StructField("C0", FloatType, false) :: Nil)
     val net = CaffeNet(netParam, schema, new DefaultPreprocessor(schema))
     val inputs = List[Row](Row(0F), Row(1F))
-    val outputs = net.forward(inputs.iterator)
+    val outputs = net.forward(inputs.iterator, List("prob"))
     val keys = outputs.keys.toArray
     assert(keys.length == 1)
     assert(keys(0) == "prob")
