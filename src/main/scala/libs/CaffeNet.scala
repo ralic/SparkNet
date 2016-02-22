@@ -28,7 +28,7 @@ object CaffeNet {
 class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preprocessor, caffeNet: FloatNet) {
   val inputSize = netParam.input_size
   val batchSize = netParam.input_shape(0).dim(0).toInt
-  private val transformations = new Array[Any => NDArray](inputSize)
+  private val transformations = new Array[(Any, Array[Float]) => Unit](inputSize)
   private val inputIndices = new Array[Int](inputSize)
   private val columnNames = schema.map(entry => entry.name)
   // private val caffeNet = new FloatNet(netParam)
@@ -78,9 +78,9 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
     while (iterator.hasNext && batchIndex != batchSize) {
       val row = iterator.next
       for (i <- 0 to inputSize - 1) {
-        val result = transformations(i)(row(inputIndices(i)))
-        assert(result.shape.product == inputBuffer(i)(batchIndex).length)
-        result.flatCopy(inputBuffer(i)(batchIndex))
+        transformations(i)(row(inputIndices(i)), inputBuffer(i)(batchIndex))
+        // assert(result.shape.product == inputBuffer(i)(batchIndex).length)
+        // result.flatCopy(inputBuffer(i)(batchIndex))
       }
       batchIndex += 1
     }
