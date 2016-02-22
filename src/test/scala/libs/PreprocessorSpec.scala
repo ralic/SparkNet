@@ -114,7 +114,6 @@ class PreprocessorSpec extends FlatSpec with BeforeAndAfterAll {
     val buffer = new Array[Float](3 * croppedHeight * croppedWidth)
     convert(df.take(1)(0)(0), buffer)
     val convertedImage = NDArray(buffer, Array[Int](3, croppedHeight, croppedWidth))
-    print("\n\nXXX\n\n" + buffer.deep.toString + "\n\nXXX\n\n")
     assert(convertedImage.shape.deep == Array[Int](3, croppedHeight, croppedWidth).deep)
     val cornerVal = convertedImage.get(Array[Int](0, 0, 0))
     assert(Set[Float](0, 1, 5, 6, 10, 11).contains(cornerVal))
