@@ -90,16 +90,8 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
   def forward(rowIt: Iterator[Row], dataBlobNames: List[String] = List[String]()): Map[String, NDArray] = {
     // Caffe.set_mode(Caffe.GPU)
     transformInto(rowIt, inputs)
-    val tops = caffeNet.Forward(inputs)
+    caffeNet.Forward(inputs)
     val outputs = Map[String, NDArray]()
-    for (j <- 0 to numOutputs - 1) {
-      val outputName = caffeNet.blob_names().get(caffeNet.output_blob_indices().get(j)).getString
-      val top = tops.get(j)
-      val shape = Array.range(0, top.num_axes).map(i => top.shape.get(i))
-      val output = new Array[Float](shape.product)
-      top.cpu_data().get(output, 0, shape.product)
-      outputs += (outputName -> NDArray(output, shape))
-    }
     for (name <- dataBlobNames) {
       val floatBlob = caffeNet.blob_by_name(name)
       if (floatBlob == null) {
