@@ -16,7 +16,7 @@ Ask questions on the [sparknet-users mailing list](https://groups.google.com/for
                                --region=eu-west-1 \
                                --zone=eu-west-1c \
                                --instance-type=g2.8xlarge \
-                               --ami=ami-c573c1b6 \
+                               --ami=ami-d0833da3 \
                                --copy-aws-credentials \
                                --spark-version=1.5.0 \
                                --spot-price=1.5 \
@@ -72,6 +72,40 @@ The flag `--slaves` specifies the number of Spark workers.
     /root/spark/bin/spark-submit --class apps.ImageNetApp /root/SparkNet/target/scala-2.10/sparknet-assembly-0.1-SNAPSHOT.jar 5 $S3_BUCKET
     ```
 
+## Installing SparkNet on an existing Spark cluster
+
+The specific instructions might depend on your cluster configurations, if you run into problems, make sure to share your experience on the mailing list.
+
+1. If you are going to use GPUs, make sure that CUDA-7.0 is installed on all the nodes.
+
+2. Depending on your configuration, you might have to add the following to your `~/.bashrc`, and run `source ~/.bashrc`.
+
+    ```
+    export LD_LIBRARY_PATH=/usr/local/cuda-7.0/targets/x86_64-linux/lib/
+    export _JAVA_OPTIONS=-Xmx8g
+    export SPARKNET_HOME=/root/SparkNet/
+    ```
+
+    Keep in mind to substitute in the right directories (the first one should contain the file `libcudart.so.7.0`).
+
+2. Clone the SparkNet repository `git clone https://github.com/amplab/SparkNet.git` in your home directory.
+
+3. Copy the SparkNet directory on all the nodes using
+
+    ```
+    ~/spark-ec2/copy-dir ~/SparkNet
+    ```
+
+3. Build SparkNet with
+
+    ```
+    cd ~/SparkNet
+    git pull
+    sbt assemble
+    ```
+
+4. Now you can for example run the CIFAR App as shown above.
+
 ## Building your own AMI
 
 1. Start an EC2 instance with Ubuntu 14.04 and a GPU instance type (e.g., g2.8xlarge). Suppose it has IP address xxx.xx.xx.xxx.
@@ -80,7 +114,12 @@ The flag `--slaves` specifies the number of Spark workers.
     ```
     ssh -i ~/.ssh/key.pem ubuntu@xxx.xx.xx.xxx
     ```
-3. Install an editor `sudo apt-get install emacs`.
+3. Install an editor
+
+    ```
+    sudo apt-get update
+    sudo apt-get install emacs
+    ```
 4. Open the file
 
     ```
@@ -93,23 +132,36 @@ The flag `--slaves` specifies the number of Spark workers.
     ```
     ssh -i ~/.ssh/key.pem root@xxx.xx.xx.xxx
     ```
-7. Intall CUDA-7.5. [The best instructions I've found are here](http://tleyden.github.io/blog/2015/11/22/cuda-7-dot-5-on-aws-gpu-instance-running-ubuntu-14-dot-04/).
-8. `echo "/usr/local/cuda-7.5/targets/x86_64-linux/lib/" > /etc/ld.so.conf.d/cuda.conf`
-9. `ldconfig`
+7. Install CUDA-7.0.
+
+    ```
+    wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_7.0-28_amd64.deb
+    dpkg -i cuda-repo-ubuntu1404_7.0-28_amd64.deb
+    apt-get update
+    apt-get upgrade -y
+    apt-get install -y linux-image-extra-`uname -r` linux-headers-`uname -r` linux-image-`uname -r`
+    apt-get install cuda-7-0 -y
+    ```
 10. Install sbt. [Instructions here](http://www.scala-sbt.org/0.13/docs/Installing-sbt-on-Linux.html).
 11. `apt-get update`
 12. `apt-get install awscli s3cmd`
 13. Install Java `apt-get install openjdk-7-jdk`.
 14. Clone the SparkNet repository `git clone https://github.com/amplab/SparkNet.git` in your home directory.
-15. Build SparkNet with `cd ~/SparkNet` and `sbt assemble`.
-16. Add the following to your `~/.bashrc`:
+15. Add the following to your `~/.bashrc`, and run `source ~/.bashrc`.
 
     ```
-    export LD_LIBRARY_PATH=/usr/local/cuda-7.5/targets/x86_64-linux/lib
+    export LD_LIBRARY_PATH=/usr/local/cuda-7.0/targets/x86_64-linux/lib/
     export _JAVA_OPTIONS=-Xmx8g
     export SPARKNET_HOME=/root/SparkNet/
     ```
-    Some of these paths may need to be adapted, but the `LD_LIBRARY_PATH` directory should contain `libcudart.so.7.5` (this file can be found with `locate libcudart.so.7.5` after running `updatedb`).
+    Some of these paths may need to be adapted, but the `LD_LIBRARY_PATH` directory should contain `libcudart.so.7.0` (this file can be found with `locate libcudart.so.7.0` after running `updatedb`).
+16. Build SparkNet with
+
+    ```
+    cd ~/SparkNet
+    git pull
+    sbt assemble
+    ```
 17. Create the file `~/.bash_profile` and add the following:
 
     ```
@@ -123,3 +175,12 @@ The flag `--slaves` specifies the number of Spark workers.
     Spark expects `JAVA_HOME` to be set in your `~/.bash_profile` and the launch script `SparkNet/ec2/spark-ec2` will give an error if it isn't there.
 18. Clear your bash history `cat /dev/null > ~/.bash_history && history -c && exit`.
 19. Now you can create an image of your instance, and you're all set! This is the procedure that we used to create our AMI.
+
+## JavaCPP Binaries
+
+We have built the JavaCPP binaries for a couple platforms.
+They are stored at the following locations:
+
+1. Ubuntu with GPUs: http://www.eecs.berkeley.edu/~rkn/snapshot-2016-03-05/
+2. Ubuntu with CPUs: http://www.eecs.berkeley.edu/~rkn/snapshot-2016-03-16-CPU/
+3. CentOS 6 with CPUs: http://www.eecs.berkeley.edu/~rkn/snapshot-2016-03-23-CENTOS6-CPU/

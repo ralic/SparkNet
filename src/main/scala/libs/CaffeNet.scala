@@ -14,8 +14,8 @@ import java.util.Arrays
 trait NetInterface {
   def forward(rowIt: Iterator[Row]): Array[Row]
   def forwardBackward(rowIt: Iterator[Row])
-  def getWeights(): WeightCollection
-  def setWeights(weights: WeightCollection)
+  def getWeights(): Map[String, MutableList[NDArray]]
+  def setWeights(weights: Map[String, MutableList[NDArray]])
   def outputSchema(): StructType
 }
 
@@ -26,21 +26,19 @@ object CaffeNet {
 }
 
 class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preprocessor, caffeNet: FloatNet) {
-  private val inputSize = netParam.input_size
-  private val batchSize = netParam.input_shape(0).dim(0).toInt
-  private val transformations = new Array[Any => NDArray](inputSize)
+  val inputSize = netParam.input_size
+  val batchSize = netParam.input_shape(0).dim(0).toInt
+  private val transformations = new Array[(Any, Array[Float]) => Unit](inputSize)
   private val inputIndices = new Array[Int](inputSize)
   private val columnNames = schema.map(entry => entry.name)
   // private val caffeNet = new FloatNet(netParam)
   private val inputRef = new Array[FloatBlob](inputSize)
   def getNet = caffeNet // TODO: For debugging
 
-  private val numOutputs = caffeNet.num_outputs
-  private val numLayers = caffeNet.layers().size.toInt
-  private val layerNames = List.range(0, numLayers).map(i => caffeNet.layers.get(i).layer_param.name.getString)
-  private val numLayerBlobs = List.range(0, numLayers).map(i => caffeNet.layers.get(i).blobs().size.toInt)
-
-  // Caffe.set_mode(Caffe.GPU)
+  val numOutputs = caffeNet.num_outputs
+  val numLayers = caffeNet.layers().size.toInt
+  val layerNames = List.range(0, numLayers).map(i => caffeNet.layers.get(i).layer_param.name.getString)
+  val numLayerBlobs = List.range(0, numLayers).map(i => caffeNet.layers.get(i).blobs().size.toInt)
 
   for (i <- 0 to inputSize - 1) {
     val name = netParam.input(i).getString
@@ -60,44 +58,35 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
     inputRef(i) = new FloatBlob(dims)
     inputs.put(i, inputRef(i))
   }
-  val inputBuffer = new Array[Array[Float]](inputSize)
+  // in `inputBuffer`, the first index indexes the input argument, the second
+  // index indexes into the batch, the third index indexes the values in the
+  // data
+  val inputBuffer = new Array[Array[Array[Float]]](inputSize)
   val inputBufferSize = new Array[Int](inputSize)
   for (i <- 0 to inputSize - 1) {
     inputBufferSize(i) = JavaCPPUtils.getInputShape(netParam, i).drop(1).product // drop 1 to ignore batchSize
-    inputBuffer(i) = new Array[Float](inputBufferSize(i) * batchSize)
+    inputBuffer(i) = new Array[Array[Float]](batchSize)
+    for (batchIndex <- 0 to batchSize - 1) {
+      inputBuffer(i)(batchIndex) = new Array[Float](inputBufferSize(i))
+    }
   }
 
-  def transformInto(iterator: Iterator[Row], data: FloatBlobVector) = {
+  def transformInto(iterator: Iterator[Row], inputs: FloatBlobVector) = {
     var batchIndex = 0
     while (iterator.hasNext && batchIndex != batchSize) {
       val row = iterator.next
       for (i <- 0 to inputSize - 1) {
-        val result = transformations(i)(row(inputIndices(i)))
-        val flatArray = result.toFlat() // TODO: Make this efficient
-        System.arraycopy(flatArray, 0, inputBuffer(i), batchIndex * inputBufferSize(i), inputBufferSize(i))
+        transformations(i)(row(inputIndices(i)), inputBuffer(i)(batchIndex))
       }
       batchIndex += 1
     }
-    for (i <- 0 to inputSize - 1) {
-      val blob = data.get(i)
-      val buffer = blob.cpu_data()
-      buffer.put(inputBuffer(i), 0, batchSize * inputBufferSize(i))
-    }
+    JavaCPPUtils.arraysToFloatBlobVector(inputBuffer, inputs, batchSize, inputBufferSize, inputSize)
   }
 
   def forward(rowIt: Iterator[Row], dataBlobNames: List[String] = List[String]()): Map[String, NDArray] = {
-    // Caffe.set_mode(Caffe.GPU)
     transformInto(rowIt, inputs)
-    val tops = caffeNet.Forward(inputs)
+    caffeNet.Forward(inputs)
     val outputs = Map[String, NDArray]()
-    for (j <- 0 to numOutputs - 1) {
-      val outputName = caffeNet.blob_names().get(caffeNet.output_blob_indices().get(j)).getString
-      val top = tops.get(j)
-      val shape = Array.range(0, top.num_axes).map(i => top.shape.get(i))
-      val output = new Array[Float](shape.product)
-      top.cpu_data().get(output, 0, shape.product)
-      outputs += (outputName -> NDArray(output, shape))
-    }
     for (name <- dataBlobNames) {
       val floatBlob = caffeNet.blob_by_name(name)
       if (floatBlob == null) {
@@ -109,7 +98,6 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
   }
 
   def forwardBackward(rowIt: Iterator[Row]) = {
-    // Caffe.set_mode(Caffe.GPU)
     print("entering forwardBackward\n")
     val t1 = System.currentTimeMillis()
     transformInto(rowIt, inputs)
@@ -120,7 +108,7 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
     print("ForwardBackward took " + ((t3 - t2) * 1F / 1000F).toString + " s\n")
   }
 
-  def getWeights(): WeightCollection = {
+  def getWeights(): Map[String, MutableList[NDArray]] = {
     val weights = Map[String, MutableList[NDArray]]()
     for (i <- 0 to numLayers - 1) {
       val weightList = MutableList[NDArray]()
@@ -133,18 +121,18 @@ class CaffeNet(netParam: NetParameter, schema: StructType, preprocessor: Preproc
       }
       weights += (layerNames(i) -> weightList)
     }
-    return new WeightCollection(weights, layerNames)
+    return weights
   }
 
-  def setWeights(weights: WeightCollection) = {
-    assert(weights.numLayers == numLayers)
+  def setWeights(weights: Map[String, MutableList[NDArray]]) = {
+    assert(weights.keys.size == numLayers)
     for (i <- 0 to numLayers - 1) {
       for (j <- 0 to numLayerBlobs(i) - 1) {
         val blob = caffeNet.layers().get(i).blobs().get(j)
         val shape = JavaCPPUtils.getFloatBlobShape(blob)
-        assert(shape.deep == weights.allWeights(layerNames(i))(j).shape.deep) // check that weights are the correct shape
-        val flatWeights = weights.allWeights(layerNames(i))(j).toFlat() // this allocation can be avoided
-        blob.cpu_data.put(flatWeights, 0, flatWeights.length)
+        assert(shape.deep == weights(layerNames(i))(j).shape.deep) // check that weights are the correct shape
+        val flatWeights = weights(layerNames(i))(j).toFlat() // this allocation can be avoided
+        blob.mutable_cpu_data.put(flatWeights, 0, flatWeights.length)
       }
     }
   }
